@@ -1,0 +1,41 @@
+{
+  "profitMargin": 0.20,
+  "sizes": [
+    {
+      "size": "Small",
+      "price": 50.0,
+      "fittings": [
+        {"fitting": "Standard", "price": 10.0},
+        {"fitting": "Premium", "price": 15.0},
+        {"fitting": "Deluxe", "price": 20.0}
+      ]
+    },
+    {
+      "size": "Medium",
+      "price": 75.0,
+      "fittings": [
+        {"fitting": "Standard", "price": 15.0},
+        {"fitting": "Premium", "price": 22.0},
+        {"fitting": "Deluxe", "price": 30.0}
+      ]
+    },
+    {
+      "size": "Large",
+      "price": 100.0,
+      "fittings": [
+        {"fitting": "Standard", "price": 20.0},
+        {"fitting": "Premium", "price": 30.0},
+        {"fitting": "Deluxe", "price": 40.0}
+      ]
+    },
+    {
+      "size": "Extra Large",
+      "price": 125.0,
+      "fittings": [
+        {"fitting": "Standard", "price": 25.0},
+        {"fitting": "Premium", "price": 38.0},
+        {"fitting": "Deluxe", "price": 50.0}
+      ]
+    }
+  ]
+}
