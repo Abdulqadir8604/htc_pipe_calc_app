@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="HTC Pipe Calculator"
+        android:label="HTC Hose Pipe Quoter"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
