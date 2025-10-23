@@ -62,6 +62,61 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     });
   }
 
+  static Route<T> _createRoute<T>(Widget page) {
+    return PageRouteBuilder<T>(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0);
+        const end = Offset.zero;
+        const curve = Curves.easeInOutCubic;
+
+        var tween = Tween(begin: begin, end: end).chain(
+          CurveTween(curve: curve),
+        );
+
+        return SlideTransition(
+          position: animation.drive(tween),
+          child: FadeTransition(
+            opacity: animation,
+            child: child,
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 400),
+      reverseTransitionDuration: const Duration(milliseconds: 300),
+    );
+  }
+
+  void _resetCalculation() {
+    setState(() {
+      _selectedSize = null;
+      _selectedFitting = null;
+      _additionalPricePercentage = 0.0;
+      _discountPercentage = 0.0;
+      _pipeLength = 1.0;
+      _pipeLengthController.text = _pipeLength.toString();
+      _additionalPriceController.clear();
+      _discountController.clear();
+    });
+    
+    // Show a brief confirmation
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 8),
+            Text('Calculator reset successfully'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF27AE60),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
   double get _total {
     if (_config == null || _selectedSize == null || _selectedFitting == null) return 0.0;
     
@@ -81,6 +136,23 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   bool get _hasAdjustments {
     return _additionalPricePercentage != 0.0 || _discountPercentage != 0.0;
+  }
+
+  double get _baseTotal {
+    if (_config == null || _selectedSize == null || _selectedFitting == null) return 0.0;
+    
+    final sizeData = _getSelectedSizeData()!;
+    final fittingData = _getSelectedFittingData()!;
+    
+    return CalculatorService.calculateTotal(sizeData.price, fittingData.price, _config!.profitMargin, _pipeLength);
+  }
+
+  double get _discountAmount {
+    return _baseTotal * (_discountPercentage / 100);
+  }
+
+  double get _additionalAmount {
+    return _baseTotal * (_additionalPricePercentage / 100);
   }
 
   @override
@@ -171,23 +243,32 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                             ),
                           ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.settings, color: Colors.white, size: 28),
-                          onPressed: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => SettingsScreen(config: _config!),
-                              ),
-                            );
-                            if (result != null) {
-                              setState(() {
-                                _config = CalculatorService.loadConfig();
-                                _selectedSize = null;
-                                _selectedFitting = null;
-                              });
-                            }
-                          },
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
+                              onPressed: _resetCalculation,
+                              tooltip: 'Reset Calculator',
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.settings, color: Colors.white, size: 28),
+                              onPressed: () async {
+                                final result = await Navigator.push(
+                                  context,
+                                  _createRoute(SettingsScreen(config: _config!)),
+                                );
+                                if (result != null) {
+                                  setState(() {
+                                    _config = CalculatorService.loadConfig();
+                                    _selectedSize = null;
+                                    _selectedFitting = null;
+                                  });
+                                }
+                              },
+                              tooltip: 'Settings',
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -216,7 +297,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                     ),
                   ),
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -419,8 +500,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         // Total Price Display
                         if (_selectedSize != null && _selectedFitting != null) ...[
                           Container(
-                            height: 200,
-                            padding: const EdgeInsets.all(30),
+                            constraints: const BoxConstraints(minHeight: 180),
+                            padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
                                 colors: [Color(0xFF27AE60), Color(0xFF2ECC71)],
@@ -454,27 +535,37 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                     color: Colors.white,
                                   ),
                                 ),
-                                // if (_hasAdjustments)
-                                //   Container(
-                                //     margin: const EdgeInsets.only(top: 12),
-                                //     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                //     decoration: BoxDecoration(
-                                //       color: Colors.white.withOpacity(0.2),
-                                //       borderRadius: BorderRadius.circular(15),
-                                //     ),
-                                //     child: const Text(
-                                //       'Adjustments applied',
-                                //       style: TextStyle(
-                                //         color: Colors.white,
-                                //         fontSize: 12,
-                                //         fontWeight: FontWeight.w500,
-                                //       ),
-                                //     ),
-                                //   ),
+                                if (_hasAdjustments) ...[
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(15),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        if (_discountPercentage > 0) ...[
+                                          const Icon(Icons.local_offer, color: Colors.white, size: 14),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'Discount ${_discountPercentage.toStringAsFixed(1)}% Applied',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
-                          const SizedBox(height: 100), // Extra space for FAB
+                          const SizedBox(height: 80), // Space for FAB
                         ],
                       ],
                     ),
