@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "955653181762",
+    "project_id": "htc-powerapp",
+    "storage_bucket": "htc-powerapp.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955653181762:android:e7ba040cd78ce8bf4ff8db",
+        "android_client_info": {
+          "package_name": "com.lamaq.htc_calc_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDCq8cqjiY84WLyTm2708Dm2Yr9Z0Y4w1Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

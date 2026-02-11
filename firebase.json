@@ -1,0 +1,1 @@
+{"flutter":{"platforms":{"android":{"default":{"projectId":"htc-powerapp","appId":"1:955653181762:android:e7ba040cd78ce8bf4ff8db","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"htc-powerapp","configurations":{"android":"1:955653181762:android:e7ba040cd78ce8bf4ff8db","ios":"1:955653181762:ios:bebdbde35e398c0c4ff8db"}}}}}}

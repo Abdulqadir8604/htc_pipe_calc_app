@@ -96,17 +96,26 @@ class CalculatorConfigAdapter extends TypeAdapter<CalculatorConfig> {
     return CalculatorConfig(
       sizes: (fields[0] as List).cast<SizeData>(),
       profitMargin: fields[1] as double,
+      version: fields[2] as int,
+      discountPercentage: (fields[3] as double?) ?? 0.0,
+      additionalPricePercentage: (fields[4] as double?) ?? 0.0,
     );
   }
 
   @override
   void write(BinaryWriter writer, CalculatorConfig obj) {
     writer
-      ..writeByte(2)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.sizes)
       ..writeByte(1)
-      ..write(obj.profitMargin);
+      ..write(obj.profitMargin)
+      ..writeByte(2)
+      ..write(obj.version)
+      ..writeByte(3)
+      ..write(obj.discountPercentage)
+      ..writeByte(4)
+      ..write(obj.additionalPricePercentage);
   }
 
   @override

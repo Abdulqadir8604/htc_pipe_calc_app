@@ -1,32 +1,53 @@
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/calculator_data.dart';
+import '../services/migration_service.dart';
 
 class HiveService {
   static const String _configBoxName = 'calculator_config';
   static const String _configKey = 'config';
-  
+
   static Box<CalculatorConfig>? _configBox;
 
   static Future<void> init() async {
     await Hive.initFlutter();
-    
+
     // Register adapters
     Hive.registerAdapter(FittingPriceAdapter());
     Hive.registerAdapter(SizeDataAdapter());
     Hive.registerAdapter(CalculatorConfigAdapter());
-    
+
     // Open boxes
     _configBox = await Hive.openBox<CalculatorConfig>(_configBoxName);
-    
-    // Initialize with default data if empty
+
+    // Initialize with default data if empty or if config has no sizes
     if (_configBox!.isEmpty) {
       await _initializeDefaultData();
+    } else {
+      final oldConfig = _configBox!.get(_configKey);
+      if (oldConfig != null) {
+        // If the config exists but has no sizes, replace it with default config
+        if (oldConfig.sizes.isEmpty) {
+          await _initializeDefaultData();
+        } else {
+          final newConfig = getDefaultConfig();
+          if (oldConfig.version < newConfig.version) {
+            final migratedConfig = MigrationService.migrate(oldConfig, newConfig);
+            await saveConfig(migratedConfig);
+          }
+        }
+      }
     }
   }
 
   static Future<void> _initializeDefaultData() async {
-    final defaultConfig = CalculatorConfig(
+    final defaultConfig = getDefaultConfig();
+    await saveConfig(defaultConfig);
+  }
+
+  static CalculatorConfig getDefaultConfig() {
+    return CalculatorConfig(
       profitMargin: 0.50,
+      version: 8,
       sizes: [
         SizeData(
           size: '1/4"',
@@ -35,8 +56,29 @@ class HiveService {
             FittingPrice(fitting: '1/4 BSP ST+ST', price: 42.0),
             FittingPrice(fitting: '1/4 BSP ST+90', price: 55.0),
             FittingPrice(fitting: '1/4 BSP 90+90', price: 68.0),
+            FittingPrice(fitting: '7/16 CR/UNF ST+ST', price: 100.0),
+            FittingPrice(fitting: '7/16 CR/UNF ST+90', price: 130.0),
+            FittingPrice(fitting: '7/16 CR/UNF 90+90', price: 160.0),
+            FittingPrice(fitting: '9/16 CR/UNF ST+ST', price: 120.0),
+            FittingPrice(fitting: '9/16 CR/UNF ST+90', price: 145.0),
+            FittingPrice(fitting: '9/16 CR/UNF 90+90', price: 180.0),
+            FittingPrice(fitting: '9/16 CR/ORFS ST+ST', price: 120.0),
+            FittingPrice(fitting: '9/16 CR/ORFS ST+90', price: 140.0),
+            FittingPrice(fitting: '9/16 CR/ORFS 90+90', price: 160.0),
+            FittingPrice(fitting: '12 X 1.5 METRIC ST+ST', price: 60.0),
+            FittingPrice(fitting: '12 X 1.5 METRIC ST+90', price: 80.0),
+            FittingPrice(fitting: '12 X 1.5 METRIC 90+90', price: 100.0),
           ],
         ),
+        // SizeData(
+        //   size: '5/16"',
+        //   price: 125.0,
+        //   fittings: [
+        //     FittingPrice(fitting: '1/4 BSP ST+ST', price: 42.0),
+        //     FittingPrice(fitting: '1/4 BSP ST+90', price: 55.0),
+        //     FittingPrice(fitting: '1/4 BSP 90+90', price: 68.0),
+        //   ],
+        // ),
         SizeData(
           size: '3/8"',
           price: 140.0,
@@ -118,8 +160,6 @@ class HiveService {
         ),
       ],
     );
-    
-    await saveConfig(defaultConfig);
   }
 
   static CalculatorConfig? getConfig() {
@@ -141,7 +181,9 @@ class HiveService {
   static Future<void> updateSizePrice(String sizeName, double newPrice) async {
     final config = getConfig();
     if (config != null) {
-      final sizeIndex = config.sizes.indexWhere((size) => size.size == sizeName);
+      final sizeIndex = config.sizes.indexWhere(
+        (size) => size.size == sizeName,
+      );
       if (sizeIndex != -1) {
         config.sizes[sizeIndex].price = newPrice;
         await saveConfig(config);
@@ -149,12 +191,20 @@ class HiveService {
     }
   }
 
-  static Future<void> updateFittingPrice(String sizeName, String fittingName, double newPrice) async {
+  static Future<void> updateFittingPrice(
+    String sizeName,
+    String fittingName,
+    double newPrice,
+  ) async {
     final config = getConfig();
     if (config != null) {
-      final sizeIndex = config.sizes.indexWhere((size) => size.size == sizeName);
+      final sizeIndex = config.sizes.indexWhere(
+        (size) => size.size == sizeName,
+      );
       if (sizeIndex != -1) {
-        final fittingIndex = config.sizes[sizeIndex].fittings.indexWhere((fitting) => fitting.fitting == fittingName);
+        final fittingIndex = config.sizes[sizeIndex].fittings.indexWhere(
+          (fitting) => fitting.fitting == fittingName,
+        );
         if (fittingIndex != -1) {
           config.sizes[sizeIndex].fittings[fittingIndex].price = newPrice;
           await saveConfig(config);
@@ -165,5 +215,18 @@ class HiveService {
 
   static Future<void> close() async {
     await _configBox?.close();
+  }
+
+  static Future<CalculatorConfig?> updateAndGetConfig() async {
+    final oldConfig = getConfig();
+    if (oldConfig != null) {
+      final newConfig = getDefaultConfig();
+      if (oldConfig.version < newConfig.version) {
+        final migratedConfig = MigrationService.migrate(oldConfig, newConfig);
+        await saveConfig(migratedConfig);
+        return migratedConfig;
+      }
+    }
+    return oldConfig;
   }
 }

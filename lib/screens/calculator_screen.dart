@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/calculator_data.dart';
@@ -16,32 +17,75 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   String? _selectedSize;
   String? _selectedFitting;
   bool _isLoading = true;
-  double _additionalPricePercentage = 0.0;
-  double _discountPercentage = 0.0;
   double _pipeLength = 1.0; // Default 1 meter
   final _additionalPriceController = TextEditingController();
   final _discountController = TextEditingController();
   final _pipeLengthController = TextEditingController();
+  StreamSubscription<CalculatorConfig?>? _configSubscription;
+
+  // Read discount/additional from the synced config
+  double get _discountPercentage => _config?.discountPercentage ?? 0.0;
+  double get _additionalPricePercentage =>
+      _config?.additionalPricePercentage ?? 0.0;
 
   @override
   void initState() {
     super.initState();
     _pipeLengthController.text = _pipeLength.toString();
     _loadConfig();
+    // Subscribe to real-time config updates from Firebase
+    _configSubscription = CalculatorService.configStream().listen(
+      (config) {
+        if (config != null && mounted) {
+          setState(() {
+            _config = config;
+            _isLoading = false;
+            // Reset fitting selection if the selected size no longer exists
+            if (_selectedSize != null &&
+                !config.sizes.any((s) => s.size == _selectedSize)) {
+              _selectedSize = null;
+              _selectedFitting = null;
+            }
+            // Reset fitting if it no longer exists under the selected size
+            if (_selectedSize != null && _selectedFitting != null) {
+              final sizeData =
+                  config.sizes
+                      .where((s) => s.size == _selectedSize)
+                      .firstOrNull;
+              if (sizeData != null &&
+                  !sizeData.fittings.any(
+                    (f) => f.fitting == _selectedFitting,
+                  )) {
+                _selectedFitting = null;
+              }
+            }
+          });
+        }
+      },
+      onError: (e) {
+        print('Config stream error: $e');
+      },
+    );
   }
 
   Future<void> _loadConfig() async {
     try {
-      final config = CalculatorService.loadConfig();
-      setState(() {
-        _config = config;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
+      final config = await CalculatorService.loadConfig();
+      print('Loaded config with ${config?.sizes.length ?? 0} sizes');
       if (mounted) {
+        // Check if widget is still mounted before setState
+        setState(() {
+          _config = config;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading config: $e');
+      if (mounted) {
+        // Check if widget is still mounted before setState
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading configuration: $e')),
         );
@@ -70,16 +114,14 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         const end = Offset.zero;
         const curve = Curves.easeInOutCubic;
 
-        var tween = Tween(begin: begin, end: end).chain(
-          CurveTween(curve: curve),
-        );
+        var tween = Tween(
+          begin: begin,
+          end: end,
+        ).chain(CurveTween(curve: curve));
 
         return SlideTransition(
           position: animation.drive(tween),
-          child: FadeTransition(
-            opacity: animation,
-            child: child,
-          ),
+          child: FadeTransition(opacity: animation, child: child),
         );
       },
       transitionDuration: const Duration(milliseconds: 400),
@@ -91,14 +133,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     setState(() {
       _selectedSize = null;
       _selectedFitting = null;
-      _additionalPricePercentage = 0.0;
-      _discountPercentage = 0.0;
       _pipeLength = 1.0;
       _pipeLengthController.text = _pipeLength.toString();
       _additionalPriceController.clear();
       _discountController.clear();
+      // Reset discount & additional in config and sync to Firebase
+      if (_config != null) {
+        _config!.discountPercentage = 0.0;
+        _config!.additionalPricePercentage = 0.0;
+        CalculatorService.saveConfig(_config!);
+      }
     });
-    
+
     // Show a brief confirmation
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -118,19 +164,25 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   double get _total {
-    if (_config == null || _selectedSize == null || _selectedFitting == null) return 0.0;
-    
+    if (_config == null || _selectedSize == null || _selectedFitting == null)
+      return 0.0;
+
     final sizeData = _getSelectedSizeData()!;
     final fittingData = _getSelectedFittingData()!;
-    
-    double baseTotal = CalculatorService.calculateTotal(sizeData.price, fittingData.price, _config!.profitMargin, _pipeLength);
-    
+
+    double baseTotal = CalculatorService.calculateTotal(
+      sizeData.price,
+      fittingData.price,
+      _config!.profitMargin,
+      _pipeLength,
+    );
+
     // Apply additional price percentage
     baseTotal += baseTotal * (_additionalPricePercentage / 100);
-    
+
     // Apply discount
     baseTotal -= baseTotal * (_discountPercentage / 100);
-    
+
     return baseTotal;
   }
 
@@ -139,12 +191,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   double get _baseTotal {
-    if (_config == null || _selectedSize == null || _selectedFitting == null) return 0.0;
-    
+    if (_config == null || _selectedSize == null || _selectedFitting == null)
+      return 0.0;
+
     final sizeData = _getSelectedSizeData()!;
     final fittingData = _getSelectedFittingData()!;
-    
-    return CalculatorService.calculateTotal(sizeData.price, fittingData.price, _config!.profitMargin, _pipeLength);
+
+    return CalculatorService.calculateTotal(
+      sizeData.price,
+      fittingData.price,
+      _config!.profitMargin,
+      _pipeLength,
+    );
   }
 
   double get _discountAmount {
@@ -218,7 +276,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF1C40F),
                                 borderRadius: BorderRadius.circular(20),
@@ -246,24 +307,31 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         Row(
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
+                              icon: const Icon(
+                                Icons.refresh,
+                                color: Colors.white,
+                                size: 28,
+                              ),
                               onPressed: _resetCalculation,
                               tooltip: 'Reset Calculator',
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              icon: const Icon(Icons.settings, color: Colors.white, size: 28),
+                              icon: const Icon(
+                                Icons.settings,
+                                color: Colors.white,
+                                size: 28,
+                              ),
                               onPressed: () async {
                                 final result = await Navigator.push(
                                   context,
-                                  _createRoute(SettingsScreen(config: _config!)),
+                                  _createRoute(
+                                    SettingsScreen(config: _config!),
+                                  ),
                                 );
                                 if (result != null) {
-                                  setState(() {
-                                    _config = CalculatorService.loadConfig();
-                                    _selectedSize = null;
-                                    _selectedFitting = null;
-                                  });
+                                  // Reload config asynchronously
+                                  _loadConfig();
                                 }
                               },
                               tooltip: 'Settings',
@@ -275,10 +343,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                     const SizedBox(height: 16),
                     const Text(
                       'Enter the pipe size and fitting. The total price will be calculated automatically.',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 16,
-                      ),
+                      style: TextStyle(color: Colors.white70, fontSize: 16),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -338,22 +403,26 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                   value: _selectedSize,
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
                                     hintText: 'Choose Pipe size',
                                     hintStyle: TextStyle(color: Colors.grey),
                                   ),
-                                  items: _config!.sizes.map((size) {
-                                    return DropdownMenuItem(
-                                      value: size.size,
-                                      child: Text(
-                                        size.size,
-                                        style: const TextStyle(
-                                          color: Color(0xFF2C3E50),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
+                                  items:
+                                      _config!.sizes.map((size) {
+                                        return DropdownMenuItem(
+                                          value: size.size,
+                                          child: Text(
+                                            size.size,
+                                            style: const TextStyle(
+                                              color: Color(0xFF2C3E50),
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
                                   onChanged: _onSizeChanged,
                                 ),
                               ),
@@ -398,22 +467,28 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                     value: _selectedFitting,
                                     decoration: const InputDecoration(
                                       border: InputBorder.none,
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
                                       hintText: 'Choose fitting type',
                                       hintStyle: TextStyle(color: Colors.grey),
                                     ),
-                                    items: _getSelectedSizeData()!.fittings.map((fitting) {
-                                      return DropdownMenuItem(
-                                        value: fitting.fitting,
-                                        child: Text(
-                                          fitting.fitting,
-                                          style: const TextStyle(
-                                            color: Color(0xFF2C3E50),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      );
-                                    }).toList(),
+                                    items:
+                                        _getSelectedSizeData()!.fittings.map((
+                                          fitting,
+                                        ) {
+                                          return DropdownMenuItem(
+                                            value: fitting.fitting,
+                                            child: Text(
+                                              fitting.fitting,
+                                              style: const TextStyle(
+                                                color: Color(0xFF2C3E50),
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
                                     onChanged: _onFittingChanged,
                                   ),
                                 ),
@@ -424,7 +499,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         ],
 
                         // Pipe Length Input
-                        if (_selectedSize != null && _selectedFitting != null) ...[
+                        if (_selectedSize != null &&
+                            _selectedFitting != null) ...[
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
@@ -468,15 +544,23 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                       FocusScope.of(context).unfocus();
                                     },
                                     inputFormatters: [
-                                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d+\.?\d{0,2}'),
+                                      ),
                                     ],
                                     decoration: const InputDecoration(
                                       border: InputBorder.none,
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
                                       hintText: 'Enter pipe length',
                                       hintStyle: TextStyle(color: Colors.grey),
                                       suffixText: 'meters',
-                                      prefixIcon: Icon(Icons.straighten, color: Color(0xFF9B59B6)),
+                                      prefixIcon: Icon(
+                                        Icons.straighten,
+                                        color: Color(0xFF9B59B6),
+                                      ),
                                     ),
                                     style: const TextStyle(
                                       color: Color(0xFF2C3E50),
@@ -485,7 +569,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                     ),
                                     onChanged: (value) {
                                       setState(() {
-                                        _pipeLength = double.tryParse(value) ?? 1.0;
+                                        _pipeLength =
+                                            double.tryParse(value) ?? 1.0;
                                         if (_pipeLength <= 0) _pipeLength = 1.0;
                                       });
                                     },
@@ -498,7 +583,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         ],
 
                         // Total Price Display
-                        if (_selectedSize != null && _selectedFitting != null) ...[
+                        if (_selectedSize != null &&
+                            _selectedFitting != null) ...[
                           Container(
                             constraints: const BoxConstraints(minHeight: 180),
                             padding: const EdgeInsets.all(24),
@@ -538,16 +624,24 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                 if (_hasAdjustments) ...[
                                   const SizedBox(height: 12),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.2),
                                       borderRadius: BorderRadius.circular(15),
                                     ),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         if (_discountPercentage > 0) ...[
-                                          const Icon(Icons.local_offer, color: Colors.white, size: 14),
+                                          const Icon(
+                                            Icons.local_offer,
+                                            color: Colors.white,
+                                            size: 14,
+                                          ),
                                           const SizedBox(width: 6),
                                           Text(
                                             'Discount ${_discountPercentage.toStringAsFixed(1)}% Applied',
@@ -579,9 +673,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       floatingActionButton: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: _hasAdjustments 
-                ? [const Color(0xFFE74C3C), const Color(0xFFC0392B)]
-                : [const Color(0xFFF1C40F), const Color(0xFFF39C12)],
+            colors:
+                _hasAdjustments
+                    ? [const Color(0xFFE74C3C), const Color(0xFFC0392B)]
+                    : [const Color(0xFFF1C40F), const Color(0xFFF39C12)],
           ),
           borderRadius: BorderRadius.circular(30),
           boxShadow: [
@@ -628,14 +723,17 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   void _showAdjustmentsDialog() {
-    _additionalPriceController.text = _additionalPricePercentage.toStringAsFixed(1);
+    _additionalPriceController.text = _additionalPricePercentage
+        .toStringAsFixed(1);
     _discountController.text = _discountPercentage.toStringAsFixed(1);
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: Container(
             padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
@@ -649,77 +747,109 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             ),
             child: const Text(
               'Price Adjustments',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           titlePadding: EdgeInsets.zero,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 16),
-              TextField(
-                controller: _additionalPriceController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                ],
-                decoration: InputDecoration(
-                  labelText: 'Additional Price (%)',
-                  hintText: 'Enter additional percentage',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  suffixText: '%',
-                  prefixIcon: const Icon(Icons.add_circle_outline, color: Color(0xFF27AE60)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _discountController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                ],
-                decoration: InputDecoration(
-                  labelText: 'Discount (%)',
-                  hintText: 'Enter discount percentage',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  suffixText: '%',
-                  prefixIcon: const Icon(Icons.remove_circle_outline, color: Color(0xFFE74C3C)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (_hasAdjustments)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1C40F).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFF1C40F)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _additionalPriceController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Additional Price (%)',
+                    hintText: 'Enter additional percentage',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixText: '%',
+                    prefixIcon: const Icon(
+                      Icons.add_circle_outline,
+                      color: Color(0xFF27AE60),
+                    ),
                   ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, color: Color(0xFFF39C12), size: 20),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Price adjustments are currently active',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF2C3E50)),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _discountController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Discount (%)',
+                    hintText: 'Enter discount percentage',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixText: '%',
+                    prefixIcon: const Icon(
+                      Icons.remove_circle_outline,
+                      color: Color(0xFFE74C3C),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_hasAdjustments)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1C40F).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFF1C40F)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: Color(0xFFF39C12),
+                          size: 20,
                         ),
-                      ),
-                    ],
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Price adjustments will sync to all devices',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF2C3E50),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () {
-                setState(() {
-                  _additionalPricePercentage = 0.0;
-                  _discountPercentage = 0.0;
-                });
+                if (_config != null) {
+                  setState(() {
+                    _config!.additionalPricePercentage = 0.0;
+                    _config!.discountPercentage = 0.0;
+                  });
+                  CalculatorService.saveConfig(_config!);
+                }
                 Navigator.of(context).pop();
               },
-              child: const Text('Clear All', style: TextStyle(color: Color(0xFFE74C3C))),
+              child: const Text(
+                'Clear All',
+                style: TextStyle(color: Color(0xFFE74C3C)),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -734,17 +864,28 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               ),
               child: TextButton(
                 onPressed: () {
-                  setState(() {
-                    _additionalPricePercentage = double.tryParse(_additionalPriceController.text) ?? 0.0;
-                    _discountPercentage = double.tryParse(_discountController.text) ?? 0.0;
-                    
-                    // Ensure values are within reasonable bounds
-                    _additionalPricePercentage = _additionalPricePercentage.clamp(0.0, 100.0);
-                    _discountPercentage = _discountPercentage.clamp(0.0, 100.0);
-                  });
+                  if (_config != null) {
+                    final additional = (double.tryParse(
+                              _additionalPriceController.text,
+                            ) ??
+                            0.0)
+                        .clamp(0.0, 100.0);
+                    final discount =
+                        (double.tryParse(_discountController.text) ?? 0.0)
+                            .clamp(0.0, 100.0);
+                    setState(() {
+                      _config!.additionalPricePercentage = additional;
+                      _config!.discountPercentage = discount;
+                    });
+                    // Save & auto-upload to Firebase
+                    CalculatorService.saveConfig(_config!);
+                  }
                   Navigator.of(context).pop();
                 },
-                child: const Text('Apply Changes', style: TextStyle(color: Colors.white)),
+                child: const Text(
+                  'Apply Changes',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ),
           ],
@@ -755,6 +896,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   @override
   void dispose() {
+    _configSubscription?.cancel();
     _additionalPriceController.dispose();
     _discountController.dispose();
     _pipeLengthController.dispose();
@@ -767,8 +909,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   FittingPrice? _getSelectedFittingData() {
-    if (_selectedFitting == null || _selectedSize == null || _config == null) return null;
+    if (_selectedFitting == null || _selectedSize == null || _config == null)
+      return null;
     final sizeData = _getSelectedSizeData()!;
-    return sizeData.fittings.firstWhere((fitting) => fitting.fitting == _selectedFitting);
+    return sizeData.fittings.firstWhere(
+      (fitting) => fitting.fitting == _selectedFitting,
+    );
   }
 }
