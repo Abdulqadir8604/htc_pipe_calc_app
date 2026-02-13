@@ -7,32 +7,41 @@ import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  } catch (e) {
-    // Firebase might already be initialized in some cases
-    print('Firebase already initialized: $e');
-  }
-  
-  await HiveService.init();
-  await FirebaseService.initialize(); // Initialize Firebase Service
 
-  // Ensure default data is available
-  if (HiveService.getConfig() == null) {
-    print('No config found, initializing default data');
-    final defaultConfig = HiveService.getDefaultConfig();
-    await HiveService.saveConfig(defaultConfig);
-    print('Default config saved with ${defaultConfig.sizes.length} sizes');
-  } else {
-    print('Config already exists with ${HiveService.getConfig()!.sizes.length} sizes');
-    // Even if config exists, if it has no sizes, initialize default data
-    if (HiveService.getConfig()!.sizes.isEmpty) {
-      print('Config has no sizes, reinitializing with default data');
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    // App should still run offline if Firebase cannot initialize.
+    print('Firebase initialization failed, continuing offline: $e');
+  }
+
+  try {
+    await HiveService.init();
+    await FirebaseService.initialize(); // Initialize Firebase Service
+
+    // Ensure default data is available
+    if (HiveService.getConfig() == null) {
+      print('No config found, initializing default data');
       final defaultConfig = HiveService.getDefaultConfig();
       await HiveService.saveConfig(defaultConfig);
       print('Default config saved with ${defaultConfig.sizes.length} sizes');
+    } else {
+      print(
+        'Config already exists with ${HiveService.getConfig()!.sizes.length} sizes',
+      );
+      // Even if config exists, if it has no sizes, initialize default data
+      if (HiveService.getConfig()!.sizes.isEmpty) {
+        print('Config has no sizes, reinitializing with default data');
+        final defaultConfig = HiveService.getDefaultConfig();
+        await HiveService.saveConfig(defaultConfig);
+        print('Default config saved with ${defaultConfig.sizes.length} sizes');
+      }
     }
+  } catch (e) {
+    // Never block app startup due to init issues.
+    print('Startup initialization error, launching app anyway: $e');
   }
 
   runApp(const CalculatorApp());

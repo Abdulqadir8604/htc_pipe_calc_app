@@ -7,17 +7,32 @@ class HiveService {
   static const String _configKey = 'config';
 
   static Box<CalculatorConfig>? _configBox;
+  static bool _isInitialized = false;
 
   static Future<void> init() async {
+    if (_isInitialized) return;
+
     await Hive.initFlutter();
 
     // Register adapters
-    Hive.registerAdapter(FittingPriceAdapter());
-    Hive.registerAdapter(SizeDataAdapter());
-    Hive.registerAdapter(CalculatorConfigAdapter());
+    if (!Hive.isAdapterRegistered(0)) {
+      Hive.registerAdapter(FittingPriceAdapter());
+    }
+    if (!Hive.isAdapterRegistered(1)) {
+      Hive.registerAdapter(SizeDataAdapter());
+    }
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(CalculatorConfigAdapter());
+    }
 
-    // Open boxes
-    _configBox = await Hive.openBox<CalculatorConfig>(_configBoxName);
+    // Open box. If old/corrupt local data fails after app update, rebuild it.
+    try {
+      _configBox = await Hive.openBox<CalculatorConfig>(_configBoxName);
+    } catch (e) {
+      print('Failed to open Hive box, recreating it: $e');
+      await Hive.deleteBoxFromDisk(_configBoxName);
+      _configBox = await Hive.openBox<CalculatorConfig>(_configBoxName);
+    }
 
     // Initialize with default data if empty or if config has no sizes
     if (_configBox!.isEmpty) {
@@ -31,12 +46,16 @@ class HiveService {
         } else {
           final newConfig = getDefaultConfig();
           if (oldConfig.version < newConfig.version) {
-            final migratedConfig = MigrationService.migrate(oldConfig, newConfig);
+            final migratedConfig = MigrationService.migrate(
+              oldConfig,
+              newConfig,
+            );
             await saveConfig(migratedConfig);
           }
         }
       }
     }
+    _isInitialized = true;
   }
 
   static Future<void> _initializeDefaultData() async {

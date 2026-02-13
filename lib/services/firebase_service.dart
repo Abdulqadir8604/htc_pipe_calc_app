@@ -7,14 +7,24 @@ import 'hive_service.dart';
 
 class FirebaseService {
   static FirebaseDatabase? _database;
+  static bool _isAvailable = false;
+
+  static bool get isAvailable => _isAvailable;
 
   static Future<void> initialize() async {
-    // Explicitly use the database URL to avoid timeouts on non-us regions
-    _database = FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL:
-          'https://htc-powerapp-default-rtdb.asia-southeast1.firebasedatabase.app',
-    );
+    try {
+      // Explicitly use the database URL to avoid timeouts on non-us regions
+      _database = FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL:
+            'https://htc-powerapp-default-rtdb.asia-southeast1.firebasedatabase.app',
+      );
+      _isAvailable = true;
+    } catch (e) {
+      _database = null;
+      _isAvailable = false;
+      print('FirebaseService initialization skipped: $e');
+    }
   }
 
   static FirebaseDatabase get database {
@@ -28,6 +38,10 @@ class FirebaseService {
 
   // Upload calculator configuration to Realtime Database
   static Future<void> uploadConfig(CalculatorConfig config) async {
+    if (!_isAvailable) {
+      print('Firebase unavailable, skipping uploadConfig');
+      return;
+    }
     print('Starting uploadConfig to Firebase...');
     try {
       print('Setting data at hosePipe/current...');
@@ -52,6 +66,10 @@ class FirebaseService {
 
   // Download calculator configuration from Realtime Database
   static Future<CalculatorConfig?> downloadConfig() async {
+    if (!_isAvailable) {
+      print('Firebase unavailable, skipping downloadConfig');
+      return null;
+    }
     try {
       DatabaseEvent event = await database.ref('hosePipe/current').once();
       DataSnapshot snapshot = event.snapshot;
@@ -122,6 +140,9 @@ class FirebaseService {
   /// Real-time listener that emits a new [CalculatorConfig] every time
   /// the Firebase data at 'hosePipe/current' changes.
   static Stream<CalculatorConfig?> listenToConfig() {
+    if (!_isAvailable) {
+      return const Stream<CalculatorConfig?>.empty();
+    }
     return database.ref('hosePipe/current').onValue.map((event) {
       try {
         final snapshot = event.snapshot;
