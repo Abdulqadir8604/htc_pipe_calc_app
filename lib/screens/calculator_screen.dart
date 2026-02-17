@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../models/calculator_data.dart';
 import '../services/calculator_service.dart';
+import 'pdf_generation_screen.dart';
 import 'settings_screen.dart';
 
 class CalculatorScreen extends StatefulWidget {
@@ -70,8 +74,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   Future<void> _loadConfig() async {
     try {
-      final config = await CalculatorService.loadConfig();
-      print('Loaded config with ${config?.sizes.length ?? 0} sizes');
+      var config = await CalculatorService.loadConfig();
+      if (config == null) {
+        config = CalculatorService.getDefaultConfig();
+        await CalculatorService.saveConfig(config);
+      }
+      print('Loaded config with ${config.sizes.length} sizes');
       if (mounted) {
         // Check if widget is still mounted before setState
         setState(() {
@@ -308,6 +316,24 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                           children: [
                             IconButton(
                               icon: const Icon(
+                                Icons.picture_as_pdf,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              onPressed: () {
+                                if (_config == null) return;
+                                Navigator.push(
+                                  context,
+                                  _createRoute(
+                                    PdfGenerationScreen(config: _config!),
+                                  ),
+                                );
+                              },
+                              tooltip: 'Generate Price List PDF',
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(
                                 Icons.refresh,
                                 color: Colors.white,
                                 size: 28,
@@ -475,20 +501,20 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                                       hintStyle: TextStyle(color: Colors.grey),
                                     ),
                                     items:
-                                        _getSelectedSizeData()!.fittings.map((
-                                          fitting,
-                                        ) {
-                                          return DropdownMenuItem(
-                                            value: fitting.fitting,
-                                            child: Text(
-                                              fitting.fitting,
-                                              style: const TextStyle(
-                                                color: Color(0xFF2C3E50),
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
+                                        _getSelectedSizeData()!.fittings
+                                            .where((f) => f.price > 0)
+                                            .map((fitting) {
+                                              return DropdownMenuItem(
+                                                value: fitting.fitting,
+                                                child: Text(
+                                                  fitting.fitting,
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF2C3E50),
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
                                     onChanged: _onFittingChanged,
                                   ),
                                 ),
@@ -720,6 +746,503 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
       ),
     );
+  }
+
+  void _showPriceListDialog() {
+    if (_config == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuration is not ready yet')),
+      );
+      return;
+    }
+
+    final customerNameController = TextEditingController();
+    final discountController = TextEditingController(text: '0');
+    final additionalController = TextEditingController(text: '0');
+    final profitMarginController = TextEditingController(
+      text: (_config!.profitMargin * 100).toStringAsFixed(1),
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF2C3E50), Color(0xFF34495E)],
+              ),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: const Text(
+              'Generate Personalized Price List',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          titlePadding: EdgeInsets.zero,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 16),
+                TextField(
+                  controller: customerNameController,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    labelText: 'Customer Name',
+                    hintText: 'Enter customer name',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.person_outline,
+                      color: Color(0xFF2C3E50),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: discountController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Discount (%)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixText: '%',
+                    prefixIcon: const Icon(
+                      Icons.local_offer_outlined,
+                      color: Color(0xFFE74C3C),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: additionalController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Additional Amount (%)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixText: '%',
+                    prefixIcon: const Icon(
+                      Icons.add_circle_outline,
+                      color: Color(0xFF27AE60),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: profitMarginController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Profit Margin (%)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixText: '%',
+                    prefixIcon: const Icon(
+                      Icons.trending_up,
+                      color: Color(0xFFF39C12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1C40F).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFF1C40F)),
+                  ),
+                  child: const Text(
+                    'These values are only for this PDF and will not update app settings or live rates.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF2C3E50)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF27AE60), Color(0xFF2ECC71)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: TextButton(
+                onPressed: () async {
+                  final customerName = customerNameController.text.trim();
+                  if (customerName.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter customer name'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  final discount = (double.tryParse(discountController.text) ??
+                          0.0)
+                      .clamp(0.0, 100.0);
+                  final additional =
+                      (double.tryParse(additionalController.text) ?? 0.0).clamp(
+                        0.0,
+                        100.0,
+                      );
+                  final marginPercent =
+                      (double.tryParse(profitMarginController.text) ?? 0.0)
+                          .clamp(0.0, 300.0);
+
+                  if (mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
+
+                  await _generateAndSharePriceListPdf(
+                    customerName: customerName,
+                    discountPercentage: discount,
+                    additionalPercentage: additional,
+                    profitMarginFraction: marginPercent / 100,
+                  );
+                },
+                child: const Text(
+                  'Generate & Share',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAndSharePriceListPdf({
+    required String customerName,
+    required double discountPercentage,
+    required double additionalPercentage,
+    required double profitMarginFraction,
+  }) async {
+    if (_config == null) return;
+
+    final pdf = pw.Document();
+    final rows = <List<String>>[];
+    final generatedOn = _formatDate(DateTime.now());
+    const shopName = 'HATIM TRADING CO.';
+    const leftAddress =
+        'SHOP No.7, Nikisha Arcade, Below Canara Bank, Goddev Fatak Road, Bhayandar (East)';
+    const rightAddress =
+        'SHOP No.3, Priti Apt, Near Meera Banquet Hall, Mira Bhayander Road, Bhayandar (East)';
+    pw.MemoryImage? logoImage;
+
+    try {
+      final logoBytes = await rootBundle.load('assets/shop_logo.png');
+      logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (e) {
+      print('Failed to load shop logo for PDF: $e');
+    }
+
+    for (final size in _config!.sizes) {
+      for (final fitting in size.fittings) {
+        final basePrice = CalculatorService.calculateTotal(
+          size.price,
+          fitting.price,
+          profitMarginFraction,
+          1.0,
+        );
+        final withAdditional =
+            basePrice + (basePrice * (additionalPercentage / 100));
+        final finalPrice =
+            withAdditional - (withAdditional * (discountPercentage / 100));
+        rows.add([
+          size.size,
+          fitting.fitting,
+          'Rs ${finalPrice.toStringAsFixed(2)}',
+        ]);
+      }
+    }
+
+    final primary = PdfColor.fromInt(0xFF2C3E50);
+    final secondary = PdfColor.fromInt(0xFF34495E);
+    final accent = PdfColor.fromInt(0xFFF1C40F);
+    final white = PdfColor.fromInt(0xFFFFFFFF);
+    final lightBg = PdfColor.fromInt(0xFFF6F8FA);
+
+    final pageTheme = pw.PageTheme(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(24),
+      buildBackground:
+          (context) => pw.FullPage(
+            ignoreMargins: true,
+            child: pw.Center(
+              child: pw.Transform.rotate(
+                angle: -0.55,
+                child: pw.Opacity(
+                  opacity: 0.08,
+                  child: pw.Text(
+                    'CONFIDENTIAL',
+                    style: pw.TextStyle(
+                      color: PdfColors.grey500,
+                      fontSize: 72,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageTheme: pageTheme,
+        header:
+            (context) => pw.Container(
+              alignment: pw.Alignment.centerRight,
+              margin: const pw.EdgeInsets.only(bottom: 8),
+              child: pw.Text(
+                'CONFIDENTIAL',
+                style: pw.TextStyle(
+                  color: PdfColors.red700,
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+        footer:
+            (context) => pw.Container(
+              margin: const pw.EdgeInsets.only(top: 12),
+              padding: const pw.EdgeInsets.only(top: 8),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(
+                  top: pw.BorderSide(color: PdfColors.grey300, width: 0.7),
+                ),
+              ),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    child: pw.Text(
+                      leftAddress,
+                      style: const pw.TextStyle(
+                        fontSize: 8,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Center(
+                      child: pw.Text(
+                        'Page ${context.pageNumber} of ${context.pagesCount}',
+                        style: const pw.TextStyle(
+                          fontSize: 9,
+                          color: PdfColors.grey700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Align(
+                      alignment: pw.Alignment.centerRight,
+                      child: pw.Text(
+                        rightAddress,
+                        textAlign: pw.TextAlign.right,
+                        style: const pw.TextStyle(
+                          fontSize: 8,
+                          color: PdfColors.grey700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        build: (context) {
+          return [
+            pw.Container(
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: primary,
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(12)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      if (logoImage != null)
+                        pw.Container(
+                          width: 48,
+                          height: 48,
+                          margin: const pw.EdgeInsets.only(right: 12),
+                          padding: const pw.EdgeInsets.all(4),
+                          decoration: const pw.BoxDecoration(
+                            color: PdfColors.white,
+                            borderRadius: pw.BorderRadius.all(
+                              pw.Radius.circular(8),
+                            ),
+                          ),
+                          child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                        ),
+                      pw.Expanded(
+                        child: pw.Text(
+                          shopName,
+                          style: pw.TextStyle(
+                            color: accent,
+                            fontSize: 18,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Personalized Price List',
+                    style: pw.TextStyle(
+                      color: white,
+                      fontSize: 22,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Prepared for $customerName',
+                    style: pw.TextStyle(color: white, fontSize: 12),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Date: $generatedOn',
+                    style: pw.TextStyle(color: white, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 14),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: secondary,
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Text(
+                'All rates are per 1 meter and include your personalized pricing.',
+                style: pw.TextStyle(color: white, fontSize: 10),
+              ),
+            ),
+            pw.SizedBox(height: 16),
+            pw.TableHelper.fromTextArray(
+              headers: const ['Pipe Size', 'Fitting', 'Final Price'],
+              data: rows,
+              headerStyle: pw.TextStyle(
+                color: primary,
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 11,
+              ),
+              headerDecoration: pw.BoxDecoration(color: accent),
+              cellStyle: const pw.TextStyle(fontSize: 10),
+              cellPadding: const pw.EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 6,
+              ),
+              cellAlignment: pw.Alignment.centerLeft,
+              rowDecoration: pw.BoxDecoration(color: lightBg),
+              oddRowDecoration: const pw.BoxDecoration(color: PdfColors.white),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1.2),
+                1: const pw.FlexColumnWidth(2.8),
+                2: const pw.FlexColumnWidth(1.2),
+              },
+            ),
+            pw.SizedBox(height: 12),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: primary, width: 0.8),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Text(
+                'Thank you, $customerName. We are happy to serve you.',
+                style: pw.TextStyle(
+                  color: primary,
+                  fontSize: 11,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+          ];
+        },
+      ),
+    );
+
+    try {
+      final bytes = await pdf.save();
+      final safeName = customerName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename:
+            'htc_hosepipe_price_list_${safeName.toLowerCase()}_${generatedOn.replaceAll(' ', '_')}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate PDF: $e')));
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final month = months[date.month - 1];
+    final day = date.day.toString().padLeft(2, '0');
+    return '$day-$month-${date.year}';
   }
 
   void _showAdjustmentsDialog() {

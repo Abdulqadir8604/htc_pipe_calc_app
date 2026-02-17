@@ -111,7 +111,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _saveSettings() async {
     await CalculatorService.saveConfig(_config);
+    if (!mounted) return;
     Navigator.pop(context, _config);
+  }
+
+  Future<void> _pushLocalTruthToFirebase() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Push Local Rates to Firebase'),
+            content: const Text(
+              'This will overwrite Firebase rates with your local dataset values. Continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Overwrite'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await CalculatorService.pushLocalTruthToFirebase();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Local rates pushed to Firebase successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Push failed: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   void _updateConfig() {
@@ -132,6 +174,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () async {
                 Navigator.of(context).pop();
                 final newConfig = await HiveService.updateAndGetConfig();
+                if (!mounted) return;
                 if (newConfig != null) {
                   setState(() {
                     _config = newConfig;
@@ -150,6 +193,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _resetToCodeDefaultRates() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('Reset Rates To Code Defaults'),
+            content: const Text(
+              'This will replace all current local rates with getDefaultConfig() values. Continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed != true) return;
+
+    final defaultConfig = HiveService.getDefaultConfig();
+    await CalculatorService.saveConfig(defaultConfig);
+    if (!mounted) return;
+
+    setState(() {
+      _config = CalculatorConfig(
+        profitMargin: defaultConfig.profitMargin,
+        version: defaultConfig.version,
+        discountPercentage: defaultConfig.discountPercentage,
+        additionalPricePercentage: defaultConfig.additionalPricePercentage,
+        sizes:
+            defaultConfig.sizes
+                .map(
+                  (s) => SizeData(
+                    size: s.size,
+                    price: s.price,
+                    fittings:
+                        s.fittings
+                            .map(
+                              (f) => FittingPrice(
+                                fitting: f.fitting,
+                                price: f.price,
+                              ),
+                            )
+                            .toList(),
+                  ),
+                )
+                .toList(),
+      );
+      _profitMarginController.text = (_config.profitMargin * 100)
+          .toStringAsFixed(0);
+      _discountController.text = _config.discountPercentage.toStringAsFixed(1);
+      _additionalPriceController.text = _config.additionalPricePercentage
+          .toStringAsFixed(1);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Code default rates applied successfully'),
+        backgroundColor: Colors.green,
+      ),
     );
   }
 
@@ -237,31 +348,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: Colors.white,
                             size: 20,
                           ),
-                          tooltip: 'Sync to Firebase',
-                          onPressed: () async {
-                            try {
-                              await CalculatorService.saveConfig(_config);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Synced to Firebase successfully',
-                                    ),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Sync failed: $e'),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                              }
-                            }
-                          },
+                          tooltip: 'Push Local Truth to Firebase',
+                          onPressed: _pushLocalTruthToFirebase,
                         ),
                       ),
                     Container(
@@ -892,6 +980,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                             ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFE67E22), Color(0xFFD35400)],
+                              ),
+                              borderRadius: BorderRadius.circular(15),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: TextButton.icon(
+                              onPressed: _resetToCodeDefaultRates,
+                              icon: const Icon(
+                                Icons.restart_alt,
+                                color: Colors.white,
+                              ),
+                              label: const Text(
+                                'Reset To Code Default Rates',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),

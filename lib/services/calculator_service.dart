@@ -1,15 +1,23 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../models/calculator_data.dart';
 import 'hive_service.dart';
 import 'firebase_service.dart';
 
 class CalculatorService {
+  static CalculatorConfig getDefaultConfig() {
+    return HiveService.getDefaultConfig();
+  }
+
   /// Real-time stream that emits config updates from Firebase.
   /// Each emission is also saved to local Hive for offline access.
   static Stream<CalculatorConfig?> configStream() {
+    if (kDebugMode) {
+      // In debug mode, keep local as source-of-truth for safe testing.
+      return const Stream<CalculatorConfig?>.empty();
+    }
     return FirebaseService.listenToConfig().map((config) {
       if (config != null) {
-        // Save to local storage as a side-effect so offline works
         HiveService.saveConfig(config);
       }
       return config;
@@ -17,28 +25,49 @@ class CalculatorService {
   }
 
   static Future<CalculatorConfig?> loadConfig() async {
-    // Try to get config from Firebase first, with a timeout
+    await HiveService.init();
+
+    final localConfig = HiveService.getConfig();
+
+    if (kDebugMode) {
+      // Debug mode: local dataset is authoritative.
+      if (localConfig != null) return localConfig;
+      final defaultConfig = HiveService.getDefaultConfig();
+      await HiveService.saveConfig(defaultConfig);
+      return defaultConfig;
+    }
+
+    // Release/profile: use Firebase as source-of-truth.
     try {
-      CalculatorConfig? firebaseConfig = await FirebaseService.downloadConfig()
-          .timeout(const Duration(seconds: 5));
+      final firebaseConfig = await FirebaseService.downloadConfig().timeout(
+        const Duration(seconds: 5),
+      );
       if (firebaseConfig != null) {
-        // Update local storage with Firebase data
+        if (localConfig != null &&
+            !_isSameConfig(localConfig, firebaseConfig)) {
+          print('Local/Firebase mismatch detected; using Firebase in release.');
+        }
         await HiveService.saveConfig(firebaseConfig);
         return firebaseConfig;
       }
     } catch (e) {
-      print('Error getting config from Firebase, falling back to local: $e');
+      print('Error loading Firebase config, falling back to local: $e');
     }
 
-    // If Firebase fails or times out, return local config
-    return HiveService.getConfig();
+    if (localConfig != null) return localConfig;
+
+    final defaultConfig = HiveService.getDefaultConfig();
+    await HiveService.saveConfig(defaultConfig);
+    return defaultConfig;
   }
 
   static Future<void> saveConfig(CalculatorConfig config) async {
     // Save to local first
     await HiveService.saveConfig(config);
 
-    // Then try to sync to Firebase
+    if (kDebugMode) return;
+
+    // Then sync to Firebase in non-debug builds
     try {
       await FirebaseService.uploadConfig(config);
     } catch (e) {
@@ -67,9 +96,11 @@ class CalculatorService {
     // Update local first
     await HiveService.updateProfitMargin(profitMargin);
 
+    if (kDebugMode) return;
+
     // Then sync to Firebase
     try {
-      CalculatorConfig? config = await loadConfig();
+      final config = HiveService.getConfig();
       if (config != null) {
         await FirebaseService.uploadConfig(config);
       }
@@ -82,9 +113,11 @@ class CalculatorService {
     // Update local first
     await HiveService.updateSizePrice(sizeName, newPrice);
 
+    if (kDebugMode) return;
+
     // Then sync to Firebase
     try {
-      CalculatorConfig? config = await loadConfig();
+      final config = HiveService.getConfig();
       if (config != null) {
         await FirebaseService.uploadConfig(config);
       }
@@ -101,9 +134,11 @@ class CalculatorService {
     // Update local first
     await HiveService.updateFittingPrice(sizeName, fittingName, newPrice);
 
+    if (kDebugMode) return;
+
     // Then sync to Firebase
     try {
-      CalculatorConfig? config = await loadConfig();
+      final config = HiveService.getConfig();
       if (config != null) {
         await FirebaseService.uploadConfig(config);
       }
@@ -126,6 +161,45 @@ class CalculatorService {
   }
 
   static Future<void> syncFirebaseToLocal() async {
+    if (kDebugMode) {
+      // Intentionally no-op in debug mode.
+      return;
+    }
     await FirebaseService.syncFirebaseToLocal();
+  }
+
+  static Future<void> pushLocalTruthToFirebase() async {
+    final localConfig = HiveService.getConfig();
+    if (localConfig == null) {
+      throw Exception('No local configuration found to upload');
+    }
+    await FirebaseService.uploadConfig(localConfig);
+  }
+
+  static bool _isSameConfig(CalculatorConfig a, CalculatorConfig b) {
+    if (a.profitMargin != b.profitMargin ||
+        a.version != b.version ||
+        a.discountPercentage != b.discountPercentage ||
+        a.additionalPricePercentage != b.additionalPricePercentage ||
+        a.sizes.length != b.sizes.length) {
+      return false;
+    }
+    for (var i = 0; i < a.sizes.length; i++) {
+      final sa = a.sizes[i];
+      final sb = b.sizes[i];
+      if (sa.size != sb.size ||
+          sa.price != sb.price ||
+          sa.fittings.length != sb.fittings.length) {
+        return false;
+      }
+      for (var j = 0; j < sa.fittings.length; j++) {
+        final fa = sa.fittings[j];
+        final fb = sb.fittings[j];
+        if (fa.fitting != fb.fitting || fa.price != fb.price) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 }
